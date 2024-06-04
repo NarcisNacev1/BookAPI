@@ -1,8 +1,8 @@
 import sqlite3
-from flask import Flask, request, jsonify, abort
+from flask import Flask, request, jsonify, redirect
+from flask_swagger_ui import get_swaggerui_blueprint
 
 app = Flask(__name__)
-
 
 def db_connection():
     conn = None
@@ -11,6 +11,22 @@ def db_connection():
     except sqlite3.error as e:
         print(e)
     return conn
+
+SWAGGER_URL = "/swagger"
+API_URL = "/static/swagger.json"
+SWAGGER_BLUEPRINT = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_URL,
+    config={
+        'app_name': "Book API"
+    }
+)
+
+app.register_blueprint(SWAGGER_BLUEPRINT, url_prefix=SWAGGER_URL)
+
+@app.route('/')
+def index():
+    return redirect("/swagger/#/")
 
 @app.route('/books', methods=['GET', 'POST'])
 def books():
@@ -26,13 +42,14 @@ def books():
         return jsonify(books)
 
     if request.method == 'POST':
-        new_author = request.form['author']
-        new_language = request.form['language']
-        new_title = request.form['title']
+        new_book = request.get_json()
+        new_author = new_book.get('author')
+        new_language = new_book.get('language')
+        new_title = new_book.get('title')
         sql = """INSERT INTO book (author, language, title) VALUES (?, ?, ?)"""
         cursor.execute(sql, (new_author, new_language, new_title))
         conn.commit()
-        return f"Book with the id: {cursor.lastrowid} created successfully", 201
+        return jsonify(new_book), 201
 
 @app.route('/book/<int:id>', methods=['GET', 'PUT', 'DELETE'])
 def single_book(id):
@@ -44,28 +61,18 @@ def single_book(id):
         cursor.execute("SELECT * FROM book WHERE id=?", (id,))
         rows = cursor.fetchall()
         for r in rows:
-            book = r
+            book = dict(id=r[0], author=r[1], language=r[2], title=r[3])
         if book is not None:
             return jsonify(book), 200
         else:
-            return "Someting is wrong", 404
+            return jsonify({"error": "Book not found"}), 404
 
     if request.method == 'PUT':
-        sql = """UPDATE book
-                 SET title=?,
-                 author=?,
-                 language=?
-                 WHERE id=? """
-
-        author = request.form['author']
-        language = request.form['language']
-        title = request.form['title']
-        updated_book = {
-            "id": id,
-            "author": author,
-            "language": language,
-            "title": title
-        }
+        updated_book = request.get_json()
+        author = updated_book.get('author')
+        language = updated_book.get('language')
+        title = updated_book.get('title')
+        sql = """UPDATE book SET author=?, language=?, title=? WHERE id=?"""
         cursor.execute(sql, (author, language, title, id))
         conn.commit()
         return jsonify(updated_book)
@@ -74,7 +81,7 @@ def single_book(id):
         sql = """DELETE FROM book WHERE id=?"""
         cursor.execute(sql, (id,))
         conn.commit()
-        return f"Book with id: {id} deleted successfully", 200
+        return jsonify({"message": f"Book with id: {id} deleted successfully"}), 200
 
 if __name__ == '__main__':
     app.run()
